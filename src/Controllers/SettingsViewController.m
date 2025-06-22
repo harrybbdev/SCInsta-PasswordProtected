@@ -1,4 +1,7 @@
 #import "SettingsViewController.h"
+#import "PassStore.h"
+
+
 
 @interface SCISettingsViewController ()
 @property (nonatomic, assign) BOOL hasDynamicSpecifiers;
@@ -17,6 +20,27 @@
 
 - (UITableViewStyle)tableViewStyle {
     return UITableViewStyleInsetGrouped;
+}
+
+static void RequirePass(UIViewController *vc, void (^granted)(void)) {
+    NSString *saved = PSReadPass();
+    if (!saved) { granted(); return; }                   // no lock yet
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Unlock"
+                                                               message:@"Enter password"
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:nil];
+    __weak typeof(vc) w = vc;
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
+                                        handler:^(__unused UIAlertAction *_) {
+        if ([a.textFields.firstObject.text isEqualToString:saved]) granted();
+        else [w dismissViewControllerAnimated:YES completion:nil];
+    }]];
+    [vc presentViewController:a animated:YES completion:nil];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    RequirePass(self, ^{ /* settings UI shows normally */ });
 }
 
 // Pref Section
@@ -157,7 +181,8 @@
             // Section 8: Security
             [self newSectionWithTitle:@"Security" footer:nil],
             [self newSwitchCellWithTitle:@"Padlock" detailTitle:@"Locks Instagram with biometrics/password" key:@"padlock" changeAction:nil],
-
+            [self newLinkCellWithTitle:@"Set / Change Password" detailTitle:nil url:nil iconURL:nil iconTransparentBG:NO],
+            
             // Section 9: Debugging
             [self newSectionWithTitle:@"Debugging" footer:nil],
             [self newSwitchCellWithTitle:@"Enable FLEX gesture" detailTitle:@"Allows you to hold 5 fingers on the screen to open the FLEX explorer" key:@"flex_instagram" changeAction:@selector(FLEXAction:)],
@@ -165,7 +190,7 @@
             // Section 10: Credits
             [self newSectionWithTitle:@"Credits" footer:[NSString stringWithFormat:@"SCInsta %@\n\nInstagram v%@", SCIVersionString, [SCIUtils IGVersionString]]],
             [self newLinkCellWithTitle:@"Developer" detailTitle:@"SoCuul" url:@"https://socuul.dev" iconURL:@"https://i.imgur.com/WSFMSok.png" iconTransparentBG:NO],
-            [self newLinkCellWithTitle:@"View Repo" detailTitle:@"View the tweak's source code on GitHub" url:@"https://github.com/SoCuul/SCInsta" iconURL:@"https://i.imgur.com/BBUNzeP.png" iconTransparentBG:YES]
+            [self newLinkCellWithTitle:@"View Repo" detailTitle:@"View the tweak's source code on GitHub" url:@"https://github.com/SoCuul/SCInsta" iconURL:@"https://i.imgur.com/BBUNzeP.png" iconTransparentBG:YES],
         ]];
         
         [self collectDynamicSpecifiersFromArray:_specifiers];
@@ -199,6 +224,38 @@
     }
     
     return UITableViewAutomaticDimension;
+}
+
+- (void)promptForNewPassword {
+    NSLog(@"promptForNewPassword HIT");
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:@"New Password"
+                                                               message:nil
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *t){ t.placeholder = @"Password"; t.secureTextEntry = YES; }];
+    [a addTextFieldWithConfigurationHandler:^(UITextField *t){ t.placeholder = @"Repeat";   t.secureTextEntry = YES; }];
+
+    __weak typeof(self) w = self;
+    [a addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
+        NSString *p1 = a.textFields[0].text;
+        NSString *p2 = a.textFields[1].text;
+        if (p1.length && [p1 isEqualToString:p2]) {
+            PSWritePass(p1);
+        }
+        [w.tableView deselectRowAtIndexPath:[w.tableView indexPathForSelectedRow] animated:YES];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    PSSpecifier *spec = [self specifierAtIndexPath:indexPath];   // ← change this line
+    NSLog(@"row tapped  spec.name=%@", spec.name ?: @"<nil>");
+    
+    if ([spec.name isEqualToString:@"Set / Change Password"]) {
+        [self promptForNewPassword];
+        [tableView deselectRowAtIndexPath:indexPath animated:YES];
+        return;
+    }
+    [super tableView:tableView didSelectRowAtIndexPath:indexPath];
 }
 
 - (void)collectDynamicSpecifiersFromArray:(NSArray *)array {
